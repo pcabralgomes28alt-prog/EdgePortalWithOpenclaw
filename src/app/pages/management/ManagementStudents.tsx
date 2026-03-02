@@ -13,11 +13,12 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import { mockStudents, getStudentsByFilter } from '../../data/mockData';
-import { Search, Sparkles, Eye, Plus } from 'lucide-react';
+import { Search, Sparkles, Eye, Plus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '../../components/ui/dialog';
 import { Student } from '../../data/mockData';
+import { filterStudentsWithAI } from '../../services/geminiService';
 
 export function ManagementStudents() {
   // list of students that can be modified locally
@@ -28,6 +29,7 @@ export function ManagementStudents() {
   const [filterEngagement, setFilterEngagement] = useState<string>('all');
   const [aiQuery, setAiQuery] = useState('');
   const [filteredStudents, setFilteredStudents] = useState<Student[]>(mockStudents);
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
 
   // state used by "new student" dialog
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
@@ -99,44 +101,56 @@ export function ManagementStudents() {
     setNewStudent({ name: '', email: '', photo: '', semester: 3, course: '', enrollmentDate: '' });
   };
 
-  const handleAIFilter = () => {
+  const handleAIFilter = async () => {
     if (!aiQuery.trim()) {
       toast.error('Digite uma consulta para filtrar');
       return;
     }
 
-    // Simulate AI processing
-    toast.success('Processando consulta com IA...');
+    setIsLoadingAI(true);
+    toast.info('Consultando Gemini AI...');
 
-    // Simple keyword matching for demo
-    let results = students;
-
-    if (aiQuery.toLowerCase().includes('ira') && aiQuery.toLowerCase().includes('acima')) {
-      const iraMatch = aiQuery.match(/(\d+)/);
-      if (iraMatch) {
-        const minIra = parseFloat(iraMatch[0]);
-        results = results.filter((s) => s.ira >= minIra);
+    try {
+      const matchingIds = await filterStudentsWithAI(aiQuery, students);
+      
+      const results = students.filter((s) => matchingIds.includes(s.id));
+      
+      setFilteredStudents(results);
+      
+      if (results.length > 0) {
+        toast.success(`${results.length} aluno(s) encontrado(s) com Gemini AI`);
+      } else {
+        toast.warning('Nenhum aluno corresponde aos critérios');
       }
-    }
-
-    if (aiQuery.toLowerCase().includes('período') || aiQuery.toLowerCase().includes('semestre')) {
-      const periodMatch = aiQuery.match(/(\d+)º/);
-      if (periodMatch) {
-        const period = parseInt(periodMatch[1]);
-        results = results.filter((s) => s.semester === period);
+    } catch (error) {
+      console.error('Erro no filtro AI:', error);
+      toast.error('Erro ao processar consulta. Verifique a chave API do Gemini.');
+      
+      // Fallback: filtro local simples
+      let fallbackResults = students;
+      const queryLower = aiQuery.toLowerCase();
+      
+      if (queryLower.includes('ira') && queryLower.includes('acima')) {
+        const match = aiQuery.match(/(\d+)/);
+        if (match) {
+          const minIra = parseFloat(match[1]);
+          fallbackResults = fallbackResults.filter((s) => s.ira >= minIra);
+        }
       }
+      if (queryLower.includes('projeto')) {
+        fallbackResults = fallbackResults.filter((s) => s.projects.length > 0);
+      }
+      if (queryLower.includes('react')) {
+        fallbackResults = fallbackResults.filter((s) => 
+          s.hardSkills.some((skill) => skill.toLowerCase().includes('react'))
+        );
+      }
+      
+      setFilteredStudents(fallbackResults);
+      toast.info(`Filtro local aplicado: ${fallbackResults.length} aluno(s)`);
+    } finally {
+      setIsLoadingAI(false);
     }
-
-    if (aiQuery.toLowerCase().includes('projeto')) {
-      results = results.filter((s) => s.projects.length > 0);
-    }
-
-    if (aiQuery.toLowerCase().includes('react')) {
-      results = results.filter((s) => s.hardSkills.some((skill) => skill.toLowerCase().includes('react')));
-    }
-
-    setFilteredStudents(results);
-    toast.success(`${results.length} aluno(s) encontrado(s)`);
   };
 
   return (
@@ -201,7 +215,7 @@ export function ManagementStudents() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-purple-600" />
-              Filtro Inteligente com IA
+              Filtro Inteligente com IA (Gemini)
             </CardTitle>
             <CardDescription>
               Use linguagem natural para filtrar. Exemplo: "Alunos do 3º período com IRA acima de 8, que participam de projeto e possuem React"
@@ -214,10 +228,25 @@ export function ManagementStudents() {
                 value={aiQuery}
                 onChange={(e) => setAiQuery(e.target.value)}
                 className="bg-white"
+                onKeyDown={(e) => e.key === 'Enter' && handleAIFilter()}
+                disabled={isLoadingAI}
               />
-              <Button onClick={handleAIFilter} className="bg-purple-600 hover:bg-purple-700">
-                <Sparkles className="w-4 h-4 mr-2" />
-                Filtrar com IA
+              <Button 
+                onClick={handleAIFilter} 
+                className="bg-purple-600 hover:bg-purple-700"
+                disabled={isLoadingAI}
+              >
+                {isLoadingAI ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Filtrar com IA
+                  </>
+                )}
               </Button>
             </div>
           </CardContent>
